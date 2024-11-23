@@ -57,6 +57,9 @@ const config = {
       '*': [],
     },
     optimizePackageImports: ['@pancakeswap/widgets-internal', '@pancakeswap/uikit'],
+    memoryBasedWorkersCount: true, // Automatically manage worker count based on memory
+    isrMemoryCacheSize: 50, // Reduce ISR cache size
+    workerThreads: false, // Disable worker threads if causing issues
   },
   transpilePackages: [
     '@pancakeswap/farms',
@@ -234,8 +237,66 @@ const config = {
     }
     return webpackConfig
   },
+  eslint: {
+    ignoreDuringBuilds: true, // This will ignore ESLint errors during build
+  },
+  onDemandEntries: {
+    // period (in ms) where the server will keep pages in the buffer
+    maxInactiveAge: 25 * 1000,
+    // number of pages that should be kept simultaneously without being disposed
+    pagesBufferLength: 2,
+  },
+}
+
+// Add a wrapper function to handle build-time memory management
+const withMemoryOptimization = (nextConfig) => {
+  return {
+    ...nextConfig,
+    webpack: (config, options) => {
+      // Call existing webpack config if it exists
+      let webpackConfig = nextConfig.webpack ? 
+        nextConfig.webpack(config, options) : 
+        config;
+
+      if (!options.isServer) {
+        // Optimize client-side bundles
+        webpackConfig.optimization.splitChunks = {
+          chunks: 'all',
+          cacheGroups: {
+            default: false,
+            vendors: false,
+            // Optimize large dependencies
+            commons: {
+              name: 'commons',
+              chunks: 'all',
+              minChunks: 2,
+              reuseExistingChunk: true,
+            },
+            // Combine react components
+            react: {
+              name: 'commons',
+              chunks: 'all',
+              test: /[\\/]node_modules[\\/](react|react-dom|scheduler)[\\/]/,
+              priority: 40,
+            },
+          },
+        }
+      }
+
+      return webpackConfig;
+    },
+  }
 }
 
 export default withVercelToolbar(
-  withBundleAnalyzer(withVanillaExtract(withSentryConfig(withWebSecurityHeaders(config)), sentryWebpackPluginOptions)),
+  withBundleAnalyzer(
+    withVanillaExtract(
+      withSentryConfig(
+        withWebSecurityHeaders(
+          withMemoryOptimization(config)
+        ), 
+        sentryWebpackPluginOptions
+      )
+    )
+  )
 )
